@@ -338,6 +338,8 @@ tbody td.dim{color:var(--t3);font-size:11px}
 /* AH badges */
 .cf-ahp{color:var(--green)}
 .cf-ahn{color:var(--red)}
+.cf-edit-inp{font-family:var(--mono);font-size:12px;border:none;border-bottom:1.5px solid #93C5FD;background:transparent;color:#1D4ED8;width:130px;text-align:right;outline:none;padding:2px 4px;font-weight:600}
+.cf-edit-inp:focus{border-bottom-color:#2563EB}
 .ainfo{background:var(--blue-lt);border:1px solid var(--blue-md);border-radius:6px;padding:9px 12px;font-size:12px;color:var(--blue);display:flex;align-items:flex-start;gap:7px}
 .awarn{background:var(--amber-lt);border:1px solid var(--amber-md);border-radius:6px;padding:9px 12px;font-size:12px;color:var(--amber)}
 .empty{text-align:center;padding:36px 16px}
@@ -648,8 +650,8 @@ body.pres #app{margin-top:34px}
         <div class="ph">
           <div><div class="pt">Fluxo de Caixa</div><div class="ps" id="cfSub">—</div></div>
           <div class="pa" style="display:flex;gap:6px;align-items:center">
-            <select class="cmp-sel" id="cfAno" onchange="renderCashflow()" style="min-width:80px;padding:3px 9px;font-size:11px"></select>
-            <select class="cmp-sel" id="cfQtd" onchange="renderCashflow()" style="min-width:100px;padding:3px 9px;font-size:11px">
+            <select class="cmp-sel" id="cfAno" onchange="renderCashflowCerberus()" style="min-width:80px;padding:3px 9px;font-size:11px"></select>
+            <select class="cmp-sel" id="cfQtd" onchange="renderCashflowCerberus()" style="min-width:100px;padding:3px 9px;font-size:11px">
               <option value="3">3 meses</option>
               <option value="6" selected>6 meses</option>
               <option value="12">12 meses</option>
@@ -1648,7 +1650,7 @@ function togSB(){
 const PAGE_RENDERS={
   dashboard:renderDash, dre:renderDRE, revenues:renderRevs,
   expenses:renderExps,  balance:renderBal, comparison:renderComparison,
-  cashflow:renderCashflow, tcv:renderTcv, pricing:renderPricing,
+  cashflow:renderCashflowCerberus, tcv:renderTcv, pricing:renderPricing,
   import:renderImpHist, settings:renderSettings,
 };
 let curPage = 'dashboard';
@@ -3838,13 +3840,22 @@ function cfToggleAV(){
   _cfAV=!_cfAV;
   var b=document.getElementById('cfAV');
   if(b) b.classList.toggle('on',_cfAV);
-  renderCashflow();
+  // Chamar a função correta dependendo do sistema
+  if(typeof renderCashflowCerberus==='function'&&document.getElementById('cfTable')&&typeof cfGetSaldo==='function'){
+    renderCashflowCerberus();
+  } else {
+    renderCashflow();
+  }
 }
 function cfToggleAH(){
   _cfAH=!_cfAH;
   var b=document.getElementById('cfAH');
   if(b) b.classList.toggle('on',_cfAH);
-  renderCashflow();
+  if(typeof renderCashflowCerberus==='function'&&typeof cfGetSaldo==='function'){
+    renderCashflowCerberus();
+  } else {
+    renderCashflow();
+  }
 }
 
 function cfFmt(v){
@@ -3872,11 +3883,33 @@ function cfRow(lbl, arr, base, cls, ind){
   return r+'</tr>';
 }
 
+// Funções auxiliares globais do Fluxo de Caixa
+function cfCells(arr, i, base, prev){
+  var v=arr[i];
+  var vcls = v<0?'cf-vn': v===0?'cf-v0':'cf-vp';
+  var out='<td class="td-sep"><span class="'+vcls+'">'+cfFmt(v)+'</span></td>';
+  if(_cfAV) out+='<td class="td-pct">'+(base&&base!==0?cfAV(v,base):'—')+'</td>';
+  if(_cfAH){
+    var ah=(prev!==null&&prev!==undefined&&prev!==0)?cfAH(v,prev):null;
+    var cls=ah!==null?(ah>=0?'cf-ahp':'cf-ahn'):'';
+    out+='<td class="td-pct '+cls+'">'+(ah!==null?(ah>=0?'+':'')+ah.toFixed(1)+'%':'—')+'</td>';
+  }
+  return out;
+}
+
+function cfRowSh(lbl, arr, base, cls){
+  var r='<tr'+(cls?' class="'+cls+'"':'')+'><td>'+lbl+'</td>';
+  arr.forEach(function(v,i){ r+=cfCells(arr,i,base?base[i]:null,i>0?arr[i-1]:null); });
+  return r+'</tr>';
+}
+
 function renderCashflow(){
   if(!CACHE._loaded) return;
   var ano=document.getElementById('cfAno');
   var qtdEl=document.getElementById('cfQtd');
   if(!ano||!qtdEl) return;
+  // Garantir que o select de ano está populado antes de renderizar
+  if(!ano.options.length) initCashflowAno();
   var anoVal=parseInt(ano.value)||new Date().getFullYear();
   var q=parseInt(qtdEl.value)||6;
 
@@ -3940,24 +3973,7 @@ function renderCashflow(){
   // ── Estrutura planilha: Indicador | Mês Val | AV% | AH% | Mês ...
   var showCols = 1 + q * (1 + (_cfAV?1:0) + (_cfAH?1:0));
 
-  function cfCells(arr, i, base, prev){
-    var v=arr[i];
-    var vcls = v<0?'cf-vn': v===0?'cf-v0':'cf-vp';
-    var out='<td class="td-sep"><span class="'+vcls+'">'+cfFmt(v)+'</span></td>';
-    if(_cfAV) out+='<td class="td-pct">'+(base&&base!==0?cfAV(v,base):'—')+'</td>';
-    if(_cfAH){
-      var ah=(prev!==null&&prev!==undefined&&prev!==0)?cfAH(v,prev):null;
-      var cls=ah!==null?(ah>=0?'cf-ahp':'cf-ahn'):'';
-      out+='<td class="td-pct '+cls+'">'+(ah!==null?(ah>=0?'+':'')+ah.toFixed(1)+'%':'—')+'</td>';
-    }
-    return out;
-  }
 
-  function cfRowSh(lbl, arr, base, cls){
-    var r='<tr'+(cls?' class="'+cls+'"':'')+'><td>'+lbl+'</td>';
-    arr.forEach(function(v,i){ r+=cfCells(arr,i,base?base[i]:null,i>0?arr[i-1]:null); });
-    return r+'</tr>';
-  }
 
   // Cabeçalho duplo
   var h='<thead>';
@@ -4029,13 +4045,159 @@ function initCashflowAno(){
   if(!sel) return;
   var cur=new Date().getFullYear();
   sel.innerHTML='';
-  for(var y=cur;y>=cur-2;y--){
+  for(var y=cur+1;y>=cur-4;y--){
     var o=document.createElement('option');
     o.value=y; o.textContent=y;
+    if(y===cur) o.selected=true;
     sel.appendChild(o);
   }
 }
 // ── FIM FLUXO DE CAIXA ───────────────────────────────────────────────
+
+
+// ── FLUXO DE CAIXA CERBERUS — saldo inicial e final editáveis ──────
+var _cfSaldos = {};
+
+function cfGetSaldo(ym, tipo){
+  var k='__cfsaldo_'+ym+'_'+tipo+'__';
+  var v=CACHE.settings[k];
+  return v!==undefined&&v!==''?parseFloat(fixValueStr(v)):null;
+}
+function cfSetSaldo(ym, tipo, val){
+  var k='__cfsaldo_'+ym+'_'+tipo+'__';
+  CACHE.settings[k]=String(val);
+  saveLocalCache();
+  queueWrite('settings',[{key:k,value:String(val)}]);
+}
+function cfSaveSaldoInput(el){
+  var ym=el.dataset.ym;
+  var tipo=el.dataset.tipo;
+  var val=parseFloat(fixValueStr(el.value))||0;
+  cfSetSaldo(ym,tipo,val);
+  el.value=val.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  renderCashflowCerberus();
+}
+function cfInputKeydown(el,e){
+  if(e.keyCode===13||e.which===13) el.blur();
+}
+
+function cfSaldoCell(v, ym, tipo, isSF){
+  var clr=isSF?'#fff':'#1D4ED8';
+  var bdr=isSF?'rgba(255,255,255,.4)':'#93C5FD';
+  var bg=isSF?'background:var(--co);':'';
+  var valStr=v?v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
+  return '<td class="td-sep" style="padding:4px 10px;'+bg+'">'+
+    '<input class="cf-edit-inp" type="text"'+
+    ' data-ym="'+ym+'" data-tipo="'+tipo+'"'+
+    ' value="'+valStr+'"'+
+    ' placeholder="0,00"'+
+    ' style="color:'+clr+';border-bottom-color:'+bdr+';font-weight:'+(isSF?700:600)+'"'+
+    ' onblur="cfSaveSaldoInput(this)"'+
+    ' onkeydown="cfInputKeydown(this,event)"'+
+    '>'+
+  '</td>';
+}
+
+function renderCashflowCerberus(){
+  if(!CACHE._loaded) return;
+  var ano=document.getElementById('cfAno');
+  var qtdEl=document.getElementById('cfQtd');
+  if(!ano||!qtdEl) return;
+  if(!ano.options.length) initCashflowAno();
+  var anoVal=parseInt(ano.value)||new Date().getFullYear();
+  var q=parseInt(qtdEl.value)||6;
+  document.getElementById('cfSub').textContent=anoVal;
+
+  var MES=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  var meses=[]; for(var m=0;m<12;m++) meses.push(String(anoVal)+'-'+String(m+1).padStart(2,'0'));
+
+  var rec=[],cva=[],dfi=[],ret=[];
+  meses.forEach(function(ym){
+    var rv=getRvs(ym); var ex=getExs(ym);
+    rec.push(rv.reduce(function(s,r){return s+(+r.value||0);},0));
+    cva.push(ex.filter(function(e){return e.classification==='variable';}).reduce(function(s,e){return s+(+e.value||0);},0));
+    dfi.push(ex.filter(function(e){return e.classification==='fixed';}).reduce(function(s,e){return s+(+e.value||0);},0));
+    ret.push(ex.filter(function(e){return e.classification==='profit';}).reduce(function(s,e){return s+(+e.value||0);},0));
+  });
+
+  var idx=[]; for(var j=0;j<q;j++) idx.push(j);
+  var recQ=idx.map(function(i){return rec[i];});
+  var cvaQ=idx.map(function(i){return cva[i];});
+  var dfiQ=idx.map(function(i){return dfi[i];});
+  var invQ=idx.map(function(){return 0;});
+  var retQ=idx.map(function(i){return ret[i];});
+  var lb=idx.map(function(i){return recQ[i]-cvaQ[i];});
+  var lo=idx.map(function(i){return lb[i]-dfiQ[i];});
+  var ll=idx.map(function(i){return lo[i]-invQ[i];});
+  var gc=idx.map(function(i){return ll[i]-retQ[i];});
+  var siQ=idx.map(function(i){ var v=cfGetSaldo(meses[i],'si'); return v!==null?v:0; });
+  var sfQ=idx.map(function(i){ var v=cfGetSaldo(meses[i],'sf'); return v!==null?v:0; });
+
+  var showCols=1+q*(1+(_cfAV?1:0)+(_cfAH?1:0));
+
+  var h='<thead>';
+  h+='<tr><th rowspan="2" style="text-align:left;min-width:160px;vertical-align:bottom;border-right:1px solid var(--b2)">Indicador</th>';
+  idx.forEach(function(i){
+    var span=1+(_cfAV?1:0)+(_cfAH?1:0);
+    h+='<th colspan="'+span+'" style="text-align:center;border-left:2px solid var(--border);font-size:10.5px;font-weight:700;color:var(--t2);letter-spacing:.04em;text-transform:none;padding:8px 10px">'+MES[i]+'</th>';
+  });
+  h+='</tr><tr>';
+  idx.forEach(function(){
+    h+='<th class="th-val th-sep">Valor</th>';
+    if(_cfAV) h+='<th class="th-pct">AV%</th>';
+    if(_cfAH) h+='<th class="th-pct">AH%</th>';
+  });
+  h+='</tr></thead><tbody>';
+
+  // Saldo inicial editável
+  h+='<tr class="cf-si"><td>Saldo inicial</td>';
+  idx.forEach(function(i){
+    h+=cfSaldoCell(siQ[i],meses[i],'si',false);
+    if(_cfAV) h+='<td class="td-pct">—</td>';
+    if(_cfAH){
+      var ah=i>0&&siQ[i-1]?cfAH(siQ[i],siQ[i-1]):null;
+      h+='<td class="td-pct">'+(ah!==null?'<span class="'+(ah>=0?'cf-ahp':'cf-ahn')+'">'+(ah>=0?'+':'')+ah.toFixed(1)+'%</span>':'—')+'</td>';
+    }
+  });
+  h+='</tr>';
+
+  h+='<tr class="cf-sec"><td colspan="'+showCols+'">Entradas</td></tr>';
+  h+=cfRowSh('Receitas brutas', recQ, null, 'cf-rec');
+  h+='<tr class="cf-sec"><td colspan="'+showCols+'">Saídas operacionais</td></tr>';
+  h+=cfRowSh('Custos variáveis', cvaQ, recQ, 'cf-exp');
+  h+='<tr class="cf-tot"><td>Lucro bruto</td>';
+  lb.forEach(function(v,i){ h+=cfCells(lb,i,recQ[i],i>0?lb[i-1]:null); });
+  h+='</tr>';
+  h+=cfRowSh('Despesas fixas', dfiQ, recQ, 'cf-exp');
+  h+='<tr class="cf-res cf-res-op"><td>Lucro operacional</td>';
+  lo.forEach(function(v,i){ h+=cfCells(lo,i,recQ[i],i>0?lo[i-1]:null); });
+  h+='</tr>';
+  h+=cfRowSh('Investimentos', invQ, recQ, 'cf-exp');
+  h+='<tr class="cf-res cf-res-op"><td>Lucro líquido</td>';
+  ll.forEach(function(v,i){ h+=cfCells(ll,i,recQ[i],i>0?ll[i-1]:null); });
+  h+='</tr>';
+  h+='<tr class="cf-sec"><td colspan="'+showCols+'">Retiradas</td></tr>';
+  h+=cfRowSh('Retiradas de lucro', retQ, recQ, 'cf-exp');
+  h+='<tr class="cf-tot"><td>Geração de caixa</td>';
+  gc.forEach(function(v,i){ h+=cfCells(gc,i,recQ[i],i>0?gc[i-1]:null); });
+  h+='</tr>';
+
+  // Saldo final editável
+  h+='<tr class="cf-sf"><td>Saldo final</td>';
+  idx.forEach(function(i){
+    h+=cfSaldoCell(sfQ[i],meses[i],'sf',true);
+    if(_cfAV) h+='<td class="td-pct" style="background:var(--co)">—</td>';
+    if(_cfAH){
+      var ah=i>0&&sfQ[i-1]?cfAH(sfQ[i],sfQ[i-1]):null;
+      h+='<td class="td-pct" style="background:var(--co)">'+(ah!==null?'<span class="'+(ah>=0?'cf-ahp':'cf-ahn')+'">'+(ah>=0?'+':'')+ah.toFixed(1)+'%</span>':'—')+'</td>';
+    }
+  });
+  h+='</tr>';
+
+  h+='</tbody>';
+  document.getElementById('cfTable').innerHTML=h;
+}
+// ── FIM CASHFLOW CERBERUS ──────────────────────────────────────────
 
 // ── ARRANQUE ──────────────────────────────────────────────────────
 init();
